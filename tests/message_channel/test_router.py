@@ -15,7 +15,7 @@ async def test_router_behavior() -> None:
 
     route = Route(
         messages=asyncio.Queue(),
-        predicator=lambda m: m=="hello",
+        predicator=lambda m: m == "hello",
     )
     router.routes.append(route)
     assert router.distribute("hello") is True

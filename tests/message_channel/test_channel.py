@@ -71,7 +71,6 @@ async def test_channel_behavior(queue, channel) -> None:
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(channel.recv(), timeout=0.1)
 
-
     sub = channel.split(lambda m: m == "hello")
     queue.put_nowait("hello")
     queue.put_nowait("world")
