@@ -4,6 +4,11 @@ help: FORCE ## Show this help
 	@grep -E '^[0-9a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	    | awk 'BEGIN {FS = ":.*?## "}; {printf "%-30s %s\n", $$1, $$2}'
 
+docs: FORCE	## Generate docs through pdoc
+	poetry run pdoc --html message_channel .
+	rm -rf docs
+	mv html/message_channel docs
+	rmdir html
 
 lint: FORCE	## Run lint with fixer
 	poetry run black .
