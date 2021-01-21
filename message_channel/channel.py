@@ -4,14 +4,11 @@ from contextlib import suppress
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
 from .router import Predicator, Route, Router
+from . import exceptions
 
 T = TypeVar("T")
 
 Reader = Callable[[], Awaitable[T]]
-
-
-class _ClosedError(Exception):
-    pass
 
 
 class Channel(Generic[T]):
@@ -38,12 +35,12 @@ class Channel(Generic[T]):
     def open(self) -> None:
         """Open the channel"""
         if self._consumer:
-            raise AttributeError("channel is already opened")
+            raise exceptions.ChannelAlreadyOpenedError("the channel is already opened")
         self._consumer = asyncio.create_task(self._start_consumer())
 
     async def _waiter(self) -> None:
         await self._closed.wait()
-        raise _ClosedError()
+        raise exceptions.ChannelClosedError()
 
     async def _start_consumer(self) -> None:
         waiter = self._waiter
@@ -51,7 +48,7 @@ class Channel(Generic[T]):
         router = self._router
         messages = self._messages
 
-        with suppress(_ClosedError):
+        with suppress(exceptions.ChannelClosedError):
             while True:
                 m = await _race(reader(), waiter())
                 if router.distribute(m):
@@ -60,24 +57,27 @@ class Channel(Generic[T]):
                 messages.put_nowait(m)
 
     async def recv(self) -> T:
-        """Receive a message which is not distributed to subchannels"""
-        if self._consumer is None:
-            raise AttributeError("channel is not opened")
+        """Receive a message which is not distributed to subchannels
+
+        It raises ChannelClosedError when the channel is closed and no
+        residual messages exist in the internal message queue.
+        """
+        if self._consumer is None and self._messages.empty():
+            raise exceptions.ChannelClosedError("the channel is closed and no residual message exist")
         return await self._messages.get()
 
     async def close(self) -> None:
         """Close the channel"""
         if self._consumer is None:
-            raise AttributeError("channel is not opened")
+            raise exceptions.ChannelClosedError("the channel is already closed")
         self._closed.set()
         await self._consumer
         self._consumer = None
 
     def split(self, predicator: Predicator[T]) -> "Subchannel[T]":
         """Split the channel by the predicator and return subchannel"""
-        if self._router is None:
-            raise AttributeError("channel is not opened")
-
+        if self._consumer is None:
+            raise exceptions.ChannelClosedError("the channel is not opened yet")
         return Subchannel(self, predicator)
 
 

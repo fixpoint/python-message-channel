@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from message_channel.channel import Channel
+from message_channel import exceptions
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ async def test_channel_behavior(queue, channel) -> None:
     queue.put_nowait("hello")
     queue.put_nowait("world")
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(exceptions.ChannelClosedError):
         await asyncio.wait_for(sub.recv(), timeout=0.1)
     assert (await channel.recv()) == "hello"
     assert (await channel.recv()) == "world"
