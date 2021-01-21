@@ -3,6 +3,7 @@
 ![PyPI](https://img.shields.io/pypi/v/python-message-channel)
 ![PyPI - License](https://img.shields.io/pypi/l/python-message-channel)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/python-message-channel)
+[![docs](https://img.shields.io/badge/-docs-lightgrey)](https://fixpoint.github.io/python-message-channel/)
 ![Test](https://github.com/fixpoint/python-message-channel/workflows/Test/badge.svg)
 
 This library provides a message channel object which subtract particular messages from mass of messages. It's like _group by_ of SQL or ReactiveX but for asynchronous reader.
@@ -89,6 +90,12 @@ And you can _split_ the channel by `channel.split()` method by a predicator like
             assert (await channel.recv()) == 'd:foo'
             assert (await channel.recv()) == 'e:foo'
 ```
+
+## API documentation
+
+https://fixpoint.github.io/python-message-channel/
+
+powered by [pdoc](https://pdoc3.github.io/pdoc/).
 
 ## License
 
