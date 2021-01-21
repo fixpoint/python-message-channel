@@ -9,6 +9,7 @@ from . import exceptions
 T = TypeVar("T")
 
 Reader = Callable[[], Awaitable[T]]
+Writer = Callable[[T], Awaitable[None]]
 
 
 class Channel(Generic[T]):
@@ -18,8 +19,9 @@ class Channel(Generic[T]):
     _messages: Queue[T]
     _consumer: Optional[Task[None]]
 
-    def __init__(self, reader: Reader[T]) -> None:
+    def __init__(self, reader: Reader[T], writer: Optional[Writer[T]] = None) -> None:
         self._reader = reader
+        self._writer = writer
         self._closed = Event()
         self._router = Router()
         self._messages = Queue()
@@ -63,8 +65,20 @@ class Channel(Generic[T]):
         residual messages exist in the internal message queue.
         """
         if self._consumer is None and self._messages.empty():
-            raise exceptions.ChannelClosedError("the channel is closed and no residual message exist")
+            raise exceptions.ChannelClosedError(
+                "the channel is closed and no residual message exist"
+            )
         return await self._messages.get()
+
+    async def send(self, message: T) -> None:
+        """Send a message through the writer
+
+        It raises ChannelNoWriterError when no writer had specified to
+        the channel constructor.
+        """
+        if self._writer is None:
+            raise exceptions.ChannelNoWriterError("the channel does not have writer")
+        await self._writer(message)
 
     async def close(self) -> None:
         """Close the channel"""
@@ -88,7 +102,7 @@ class Subchannel(Channel[T]):
     def __init__(self, parent: Channel[T], predicator: Predicator[T]) -> None:
         self._route = Route(messages=Queue(), predicator=predicator)
         self._parent = parent
-        super().__init__(self._route.messages.get)
+        super().__init__(self._route.messages.get, self._parent._writer)
 
     def open(self) -> None:
         super().open()

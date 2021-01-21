@@ -8,3 +8,7 @@ class ChannelClosedError(ChannelError):
 
 class ChannelAlreadyOpenedError(ChannelError):
     """Error raised when channel is already opened"""
+
+
+class ChannelNoWriterError(ChannelError):
+    """Error raised when channel does not have writer"""

@@ -13,7 +13,7 @@ async def queue() -> asyncio.Queue[str]:
 
 @pytest.fixture
 async def channel(queue) -> Channel[str]:
-    async with Channel(queue.get) as channel:
+    async with Channel(queue.get, queue.put) as channel:
         yield channel
 
 
@@ -151,3 +151,20 @@ async def test_channel_split_create_a_subchannel_context(queue, channel) -> None
     queue.put_nowait("world")
     assert (await channel.recv()) == "hello"
     assert (await channel.recv()) == "world"
+
+
+@pytest.mark.asyncio
+async def test_channel_send(queue, channel) -> None:
+    await channel.send("hello")
+    await channel.send("world")
+    assert (await channel.recv()) == "hello"
+    assert (await channel.recv()) == "world"
+
+
+@pytest.mark.asyncio
+async def test_channel_send_from_subchannel(queue, channel) -> None:
+    async with channel.split(lambda m: m == "hello") as sub:
+        await sub.send("hello")
+        await sub.send("world")
+        assert (await sub.recv()) == "hello"
+        assert (await channel.recv()) == "world"
