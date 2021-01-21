@@ -5,7 +5,7 @@ help: FORCE ## Show this help
 	    | awk 'BEGIN {FS = ":.*?## "}; {printf "%-30s %s\n", $$1, $$2}'
 
 docs: FORCE	## Generate docs through pdoc
-	poetry run pdoc --html message_channel .
+	poetry run pdoc --html message_channel
 	rm -rf docs
 	mv html/message_channel docs
 	rmdir html
