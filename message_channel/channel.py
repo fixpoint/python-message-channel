@@ -3,8 +3,8 @@ from asyncio import Event, Queue, Task
 from contextlib import suppress
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
-from .router import Predicator, Route, Router
 from . import exceptions
+from .router import Predicator, Route, Router
 
 T = TypeVar("T")
 

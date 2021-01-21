@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from message_channel.channel import Channel
 from message_channel import exceptions
+from message_channel.channel import Channel
 
 
 @pytest.fixture
