@@ -78,7 +78,7 @@ __all__ = [
 
     _router: Router[T]
     _messages: Queue[T]
-    _consumer: Optional[Task[None]]
+    _listener: Optional[Task[None]]
 
     def __init__(self, reader: Reader[T], writer: Optional[Writer[T]] = None) -&gt; None:
         self._reader = reader
@@ -86,7 +86,7 @@ __all__ = [
         self._closed = Event()
         self._router = Router()
         self._messages = Queue()
-        self._consumer = None
+        self._listener = None
 
     async def __aenter__(self) -&gt; &#34;Channel[T]&#34;:
         self.open()
@@ -97,27 +97,39 @@ __all__ = [
 
     def open(self) -&gt; None:
         &#34;&#34;&#34;Open the channel&#34;&#34;&#34;
-        if self._consumer:
+        if self._listener:
             raise exceptions.ChannelAlreadyOpenedError(&#34;the channel is already opened&#34;)
-        self._consumer = asyncio.create_task(self._start_consumer())
+        self._listener = asyncio.create_task(self._start_listener())
 
-    async def _waiter(self) -&gt; None:
-        await self._closed.wait()
-        raise exceptions.ChannelClosedError()
+    async def _start_listener(self) -&gt; None:
+        async def waiter_handler() -&gt; None:
+            await self._closed.wait()
 
-    async def _start_consumer(self) -&gt; None:
-        waiter = self._waiter
-        reader = self._reader
-        router = self._router
-        messages = self._messages
+        async def consumer_handler() -&gt; None:
+            router = self._router
+            messages = self._messages
 
-        with suppress(exceptions.ChannelClosedError):
             while True:
-                m = await _race(reader(), waiter())
+                logger.debug(f&#34;Receive message [pre ] ({id(self)})&#34;)
+                m = await self._reader()
+                logger.debug(f&#34;Receive message [post] ({id(self)}): {str(m)}&#34;)
                 if router.distribute(m):
+                    logger.debug(f&#34;The message is distributed ({id(self)})&#34;)
                     continue
+                logger.debug(f&#34;The message is queued ({id(self)})&#34;)
                 # The message is not distributed so put in this channel
                 messages.put_nowait(m)
+
+        logger.debug(f&#34;Open listener ({id(self)})&#34;)
+        waiter = asyncio.create_task(waiter_handler())
+        consumer = asyncio.create_task(consumer_handler())
+        _, pending = await asyncio.wait(
+            [waiter, consumer],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        logger.debug(f&#34;Close listener ({id(self)})&#34;)
 
     async def recv(self) -&gt; T:
         &#34;&#34;&#34;Receive a message which is not distributed to subchannels
@@ -125,7 +137,7 @@ __all__ = [
         It raises ChannelClosedError when the channel is closed and no
         residual messages exist in the internal message queue.
         &#34;&#34;&#34;
-        if self._consumer is None and self._messages.empty():
+        if self._listener is None and self._messages.empty():
             raise exceptions.ChannelClosedError(
                 &#34;the channel is closed and no residual message exist&#34;
             )
@@ -143,15 +155,15 @@ __all__ = [
 
     async def close(self) -&gt; None:
         &#34;&#34;&#34;Close the channel&#34;&#34;&#34;
-        if self._consumer is None:
+        if self._listener is None:
             raise exceptions.ChannelClosedError(&#34;the channel is already closed&#34;)
         self._closed.set()
-        await self._consumer
-        self._consumer = None
+        await self._listener
+        self._listener = None
 
     def split(self, predicator: Predicator[T]) -&gt; &#34;Subchannel[T]&#34;:
         &#34;&#34;&#34;Split the channel by the predicator and return subchannel&#34;&#34;&#34;
-        if self._consumer is None:
+        if self._listener is None:
             raise exceptions.ChannelClosedError(&#34;the channel is not opened yet&#34;)
         return Subchannel(self, predicator)</code></pre>
 </details>
@@ -176,11 +188,11 @@ __all__ = [
 </summary>
 <pre><code class="python">async def close(self) -&gt; None:
     &#34;&#34;&#34;Close the channel&#34;&#34;&#34;
-    if self._consumer is None:
+    if self._listener is None:
         raise exceptions.ChannelClosedError(&#34;the channel is already closed&#34;)
     self._closed.set()
-    await self._consumer
-    self._consumer = None</code></pre>
+    await self._listener
+    self._listener = None</code></pre>
 </details>
 </dd>
 <dt id="message_channel.Channel.open"><code class="name flex">
@@ -194,9 +206,9 @@ __all__ = [
 </summary>
 <pre><code class="python">def open(self) -&gt; None:
     &#34;&#34;&#34;Open the channel&#34;&#34;&#34;
-    if self._consumer:
+    if self._listener:
         raise exceptions.ChannelAlreadyOpenedError(&#34;the channel is already opened&#34;)
-    self._consumer = asyncio.create_task(self._start_consumer())</code></pre>
+    self._listener = asyncio.create_task(self._start_listener())</code></pre>
 </details>
 </dd>
 <dt id="message_channel.Channel.recv"><code class="name flex">
@@ -216,7 +228,7 @@ residual messages exist in the internal message queue.</p></div>
     It raises ChannelClosedError when the channel is closed and no
     residual messages exist in the internal message queue.
     &#34;&#34;&#34;
-    if self._consumer is None and self._messages.empty():
+    if self._listener is None and self._messages.empty():
         raise exceptions.ChannelClosedError(
             &#34;the channel is closed and no residual message exist&#34;
         )
@@ -256,7 +268,7 @@ the channel constructor.</p></div>
 </summary>
 <pre><code class="python">def split(self, predicator: Predicator[T]) -&gt; &#34;Subchannel[T]&#34;:
     &#34;&#34;&#34;Split the channel by the predicator and return subchannel&#34;&#34;&#34;
-    if self._consumer is None:
+    if self._listener is None:
         raise exceptions.ChannelClosedError(&#34;the channel is not opened yet&#34;)
     return Subchannel(self, predicator)</code></pre>
 </details>
