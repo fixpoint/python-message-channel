@@ -1,6 +1,5 @@
 import asyncio
 from asyncio import Event, Queue, Task
-from contextlib import suppress
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
 from . import exceptions
@@ -17,7 +16,7 @@ class Channel(Generic[T]):
 
     _router: Router[T]
     _messages: Queue[T]
-    _consumer: Optional[Task[None]]
+    _listener: Optional[Task[None]]
 
     def __init__(self, reader: Reader[T], writer: Optional[Writer[T]] = None) -> None:
         self._reader = reader
@@ -25,7 +24,7 @@ class Channel(Generic[T]):
         self._closed = Event()
         self._router = Router()
         self._messages = Queue()
-        self._consumer = None
+        self._listener = None
 
     async def __aenter__(self) -> "Channel[T]":
         self.open()
@@ -36,44 +35,33 @@ class Channel(Generic[T]):
 
     def open(self) -> None:
         """Open the channel"""
-        if self._consumer:
+        if self._listener:
             raise exceptions.ChannelAlreadyOpenedError("the channel is already opened")
-        self._consumer = asyncio.create_task(self._start_consumer())
+        self._listener = asyncio.create_task(self._start_listener())
 
-    async def _start_consumer(self) -> None:
-        reader = self._reader
-        router = self._router
-        messages = self._messages
-
-        async def waiter() -> T:
+    async def _start_listener(self) -> None:
+        async def waiter_handler() -> None:
             await self._closed.wait()
-            raise exceptions.ChannelClosedError()
 
-        with suppress(exceptions.ChannelClosedError):
+        async def consumer_handler() -> None:
+            router = self._router
+            messages = self._messages
+
             while True:
-                done, pending = await asyncio.wait(
-                    [
-                        asyncio.create_task(reader()),
-                        asyncio.create_task(waiter()),
-                    ],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in pending:
-                    task.cancel()
-                # Handle 'reader()'
-                for task in done:
-                    if task.exception():
-                        continue
-                    m = task.result()
-                    if router.distribute(m):
-                        continue
-                    # The message is not distributed so put in this channel
-                    messages.put_nowait(m)
-                # Handle 'waiter()'
-                for task in done:
-                    if not task.exception():
-                        continue
-                    task.result()
+                m = await self._reader()
+                if router.distribute(m):
+                    continue
+                # The message is not distributed so put in this channel
+                messages.put_nowait(m)
+
+        waiter = asyncio.create_task(waiter_handler())
+        consumer = asyncio.create_task(consumer_handler())
+        _, pending = await asyncio.wait(
+            [waiter, consumer],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
 
     async def recv(self) -> T:
         """Receive a message which is not distributed to subchannels
@@ -81,7 +69,7 @@ class Channel(Generic[T]):
         It raises ChannelClosedError when the channel is closed and no
         residual messages exist in the internal message queue.
         """
-        if self._consumer is None and self._messages.empty():
+        if self._listener is None and self._messages.empty():
             raise exceptions.ChannelClosedError(
                 "the channel is closed and no residual message exist"
             )
@@ -99,15 +87,15 @@ class Channel(Generic[T]):
 
     async def close(self) -> None:
         """Close the channel"""
-        if self._consumer is None:
+        if self._listener is None:
             raise exceptions.ChannelClosedError("the channel is already closed")
         self._closed.set()
-        await self._consumer
-        self._consumer = None
+        await self._listener
+        self._listener = None
 
     def split(self, predicator: Predicator[T]) -> "Subchannel[T]":
         """Split the channel by the predicator and return subchannel"""
-        if self._consumer is None:
+        if self._listener is None:
             raise exceptions.ChannelClosedError("the channel is not opened yet")
         return Subchannel(self, predicator)
 
