@@ -1,5 +1,6 @@
 import asyncio
 from asyncio import Event, Queue, Task
+from logging import getLogger
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
 from . import exceptions
@@ -9,6 +10,8 @@ T = TypeVar("T")
 
 Reader = Callable[[], Awaitable[T]]
 Writer = Callable[[T], Awaitable[None]]
+
+logger = getLogger(__name__)
 
 
 class Channel(Generic[T]):
@@ -48,12 +51,17 @@ class Channel(Generic[T]):
             messages = self._messages
 
             while True:
+                logger.debug(f"Receive message [pre ] ({id(self)})")
                 m = await self._reader()
+                logger.debug(f"Receive message [post] ({id(self)}): {str(m)}")
                 if router.distribute(m):
+                    logger.debug(f"The message is distributed ({id(self)})")
                     continue
+                logger.debug(f"The message is queued ({id(self)})")
                 # The message is not distributed so put in this channel
                 messages.put_nowait(m)
 
+        logger.debug(f"Open listener ({id(self)})")
         waiter = asyncio.create_task(waiter_handler())
         consumer = asyncio.create_task(consumer_handler())
         _, pending = await asyncio.wait(
@@ -62,6 +70,7 @@ class Channel(Generic[T]):
         )
         for task in pending:
             task.cancel()
+        logger.debug(f"Close listener ({id(self)})")
 
     async def recv(self) -> T:
         """Receive a message which is not distributed to subchannels
