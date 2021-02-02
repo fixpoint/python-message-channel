@@ -40,23 +40,40 @@ class Channel(Generic[T]):
             raise exceptions.ChannelAlreadyOpenedError("the channel is already opened")
         self._consumer = asyncio.create_task(self._start_consumer())
 
-    async def _waiter(self) -> None:
-        await self._closed.wait()
-        raise exceptions.ChannelClosedError()
-
     async def _start_consumer(self) -> None:
-        waiter = self._waiter
         reader = self._reader
         router = self._router
         messages = self._messages
 
+        async def waiter() -> T:
+            await self._closed.wait()
+            raise exceptions.ChannelClosedError()
+
         with suppress(exceptions.ChannelClosedError):
             while True:
-                m = await _race(reader(), waiter())
-                if router.distribute(m):
-                    continue
-                # The message is not distributed so put in this channel
-                messages.put_nowait(m)
+                done, pending = await asyncio.wait(
+                    [
+                        asyncio.create_task(reader()),
+                        asyncio.create_task(waiter()),
+                    ],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                # Handle 'reader()'
+                for task in done:
+                    if task.exception():
+                        continue
+                    m = task.result()
+                    if router.distribute(m):
+                        continue
+                    # The message is not distributed so put in this channel
+                    messages.put_nowait(m)
+                # Handle 'waiter()'
+                for task in done:
+                    if not task.exception():
+                        continue
+                    task.result()
 
     async def recv(self) -> T:
         """Receive a message which is not distributed to subchannels
@@ -111,7 +128,3 @@ class Subchannel(Channel[T]):
     async def close(self) -> None:
         self._parent._router.routes.remove(self._route)
         await super().close()
-
-
-async def _race(*fs: Awaitable[Any]) -> Any:
-    return await next(iter(asyncio.as_completed(fs)))
