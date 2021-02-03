@@ -64,12 +64,14 @@ class Channel(Generic[T]):
         logger.debug(f"Open listener ({id(self)})")
         waiter = asyncio.create_task(waiter_handler())
         consumer = asyncio.create_task(consumer_handler())
-        _, pending = await asyncio.wait(
+        done, pending = await asyncio.wait(
             [waiter, consumer],
             return_when=asyncio.FIRST_COMPLETED,
         )
         for task in pending:
             task.cancel()
+        for task in done:
+            task.result()
         logger.debug(f"Close listener ({id(self)})")
 
     async def recv(self) -> T:
