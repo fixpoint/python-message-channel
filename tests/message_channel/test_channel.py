@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,6 +22,18 @@ async def channel(queue) -> Channel[str]:
 async def test_channel_recv_raise_exception_on_closed_channel(queue) -> None:
     channel = Channel(queue.get)
 
+    with pytest.raises(exceptions.ChannelClosedError):
+        await channel.recv()
+
+
+@pytest.mark.asyncio
+async def test_channel_recv_raise_exception_on_open_and_closed_channel() -> None:
+    loop = asyncio.get_event_loop()
+    get = MagicMock()
+    get.return_value = loop.create_future()
+    get.return_value.set_exception(exceptions.ChannelClosedError)
+    channel = Channel(get)
+    channel.open()
     with pytest.raises(exceptions.ChannelClosedError):
         await channel.recv()
 

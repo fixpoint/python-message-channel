@@ -1,7 +1,8 @@
 import asyncio
-from asyncio import Event, Queue, Task
+from asyncio import Event, Future, Queue, Task
+from functools import partial
 from logging import getLogger
-from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, Union
 
 from . import exceptions
 from .router import Predicator, Route, Router
@@ -84,7 +85,34 @@ class Channel(Generic[T]):
             raise exceptions.ChannelClosedError(
                 "the channel is closed and no residual message exist"
             )
-        return await self._messages.get()
+
+        loop = asyncio.get_event_loop()
+        waiter: Future[T] = loop.create_future()
+
+        def _release_waiter(f: Union[Future[T], Future[None]]) -> None:
+            if waiter.done():
+                return
+            elif (exc := f.exception()) :
+                waiter.set_exception(exc)
+            elif (res := f.result()) :
+                waiter.set_result(res)
+            else:
+                waiter.set_exception(
+                    exceptions.ChannelClosedError("the channel is closed")
+                )
+
+        if self._listener:
+            self._listener.add_done_callback(_release_waiter)
+            waiter.add_done_callback(
+                partial(self._listener.remove_done_callback, _release_waiter)
+            )
+
+        getter = asyncio.create_task(self._messages.get())
+        getter.add_done_callback(_release_waiter)
+        try:
+            return await waiter
+        finally:
+            getter.cancel()
 
     async def send(self, message: T) -> None:
         """Send a message through the writer
